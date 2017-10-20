@@ -40,8 +40,8 @@ index 76914cd7..d86112fc 100644
      ":icuuc",
    ]
  
-@@ -551,7 +556,7 @@ component("icui18n") {
-   public_configs = [ ":icu_config" ]
+@@ -557,7 +557,7 @@ component("icui18n") {
+   }
  }
  
 -component("icuuc") {
