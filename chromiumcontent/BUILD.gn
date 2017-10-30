@@ -30,6 +30,7 @@ group("targets") {
       "//ui/display/util",
       "//ui/latency",
       "//ui/views",
+      "//ui/ozone",
       "//ui/views/controls/webview",
     ]
 
