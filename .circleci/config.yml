@@ -231,6 +231,12 @@ jobs:
       - image: electronbuilds/libchromiumcontent:0.0.4
         environment:
           TARGET_ARCH: mips64el
+        pre:
+          - sudo fallocate -l 8G /swapfile
+          - sudo chmod 600 /swapfile
+          - sudo mkswap /swapfile
+          - sudo swapon /swapfile
+          - swapon -s
     resource_class: xlarge
     steps:
       - checkout
