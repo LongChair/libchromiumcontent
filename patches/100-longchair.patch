@@ -1,0 +1,362 @@
+diff --git a/base/event_types.h b/base/event_types.h
+index 9905800d2e8c..f7a1830b6136 100644
+--- a/base/event_types.h
++++ b/base/event_types.h
+@@ -17,7 +17,11 @@ typedef union _XEvent XEvent;
+ #else  // __OBJC__
+ class NSEvent;
+ #endif // __OBJC__
+-#endif
++#elif defined(USE_AURA)
++namespace ui {
++class Event;
++}
++#endif  // defined(USE_AURA)
+
+ namespace base {
+
+@@ -28,6 +32,8 @@ typedef MSG NativeEvent;
+ typedef XEvent* NativeEvent;
+ #elif defined(OS_MACOSX)
+ typedef NSEvent* NativeEvent;
++#elif defined(USE_AURA)
++typedef ui::Event *NativeEvent;
+ #else
+ typedef void* NativeEvent;
+ #endif
+diff --git a/chrome/browser/ui/libgtkui/BUILD.gn b/chrome/browser/ui/libgtkui/BUILD.gn
+index e24526e1dc1b..a408f9a86d15 100644
+--- a/chrome/browser/ui/libgtkui/BUILD.gn
++++ b/chrome/browser/ui/libgtkui/BUILD.gn
+@@ -60,11 +60,9 @@ template("libgtkui") {
+                 "skia_utils_gtk.h",
+                 "unity_service.cc",
+                 "unity_service.h",
+-                "x11_input_method_context_impl_gtk.cc",
+-                "x11_input_method_context_impl_gtk.h",
+               ]
+
+-    configs += [ "//build/config/linux:x11" ]
++    #configs += [ "//build/config/linux:x11" ]
+
+     if (use_gconf) {
+       sources += [
+@@ -91,6 +89,7 @@ template("libgtkui") {
+              "//chrome:strings",
+              "//chrome/app:command_ids",
+              "//chrome/app/theme:theme_resources",
++             "//chrome/common:features",
+              "//components/resources",
+              "//content/public/browser",
+              "//printing",
+@@ -106,10 +105,10 @@ template("libgtkui") {
+              "//ui/display",
+              "//ui/events",
+              "//ui/events:events_base",
+-             "//ui/events/platform/x11",
++#             "//ui/events/platform/x11",
+              "//ui/gfx",
+              "//ui/gfx/geometry",
+-             "//ui/gfx/x",
++#             "//ui/gfx/x",
+              "//ui/native_theme",
+              "//ui/resources",
+              "//ui/shell_dialogs",
+diff --git a/chrome/browser/ui/libgtkui/app_indicator_icon_menu.cc b/chrome/browser/ui/libgtkui/app_indicator_icon_menu.cc
+index 40399a35f8d2..1d3a0da948dc 100644
+--- a/chrome/browser/ui/libgtkui/app_indicator_icon_menu.cc
++++ b/chrome/browser/ui/libgtkui/app_indicator_icon_menu.cc
+@@ -116,7 +116,7 @@ void AppIndicatorIconMenu::OnMenuItemActivated(GtkWidget* menu_item) {
+     return;
+
+   // The menu item can still be activated by hotkeys even if it is disabled.
+-  if (menu_model_->IsEnabledAt(id))
++  if (model->IsEnabledAt(id))
+     ExecuteCommand(model, id);
+ }
+
+diff --git a/chrome/browser/ui/libgtkui/gconf_listener.cc b/chrome/browser/ui/libgtkui/gconf_listener.cc
+index 9beea2500d51..1a30e3e81cbf 100644
+--- a/chrome/browser/ui/libgtkui/gconf_listener.cc
++++ b/chrome/browser/ui/libgtkui/gconf_listener.cc
+@@ -49,7 +49,11 @@ GConfListener::GConfListener(GtkUi* delegate)
+       base::nix::GetDesktopEnvironment(env.get());
+   if (de == base::nix::DESKTOP_ENVIRONMENT_GNOME ||
+       de == base::nix::DESKTOP_ENVIRONMENT_UNITY ||
++#if defined(USE_X11)
+       ui::GuessWindowManager() == ui::WM_METACITY) {
++#else
++      false) {
++#endif
+     client_ = gconf_client_get_default();
+     // If we fail to get a context, that's OK, since we'll just fallback on
+     // not receiving gconf keys.
+diff --git a/chrome/browser/ui/libgtkui/gtk_event_loop.cc b/chrome/browser/ui/libgtkui/gtk_event_loop.cc
+index 1862918eba66..a11085067c8c 100644
+--- a/chrome/browser/ui/libgtkui/gtk_event_loop.cc
++++ b/chrome/browser/ui/libgtkui/gtk_event_loop.cc
+@@ -58,7 +58,7 @@ void Gtk2EventLoop::ProcessGdkEventKey(const GdkEventKey& gdk_event_key) {
+   // pushes it back to the GDK event queue.  In this case, there is no
+   // corresponding key event in the X event queue.  So we have to handle this
+   // case.  ibus-gtk is used through gtk-immodule to support IMEs.
+-
++#if defined(USE_X11)
+   XEvent x_event = {0};
+   x_event.xkey.type =
+       gdk_event_key.type == GDK_KEY_PRESS ? KeyPress : KeyRelease;
+@@ -77,6 +77,7 @@ void Gtk2EventLoop::ProcessGdkEventKey(const GdkEventKey& gdk_event_key) {
+     x11_source->DispatchXEventNow(&x_event);
+   else
+     XPutBackEvent(x_event.xkey.display, &x_event);
++#endif
+ }
+
+ }  // namespace libgtkui
+diff --git a/chrome/browser/ui/libgtkui/gtk_key_bindings_handler.cc b/chrome/browser/ui/libgtkui/gtk_key_bindings_handler.cc
+index 59244f410da8..55b2698e8ec0 100644
+--- a/chrome/browser/ui/libgtkui/gtk_key_bindings_handler.cc
++++ b/chrome/browser/ui/libgtkui/gtk_key_bindings_handler.cc
+@@ -5,9 +5,12 @@
+ #include "chrome/browser/ui/libgtkui/gtk_key_bindings_handler.h"
+
+ #include <gdk/gdkkeysyms.h>
+-#include <X11/Xlib.h>
+ #include <stddef.h>
++
++#if defined(USE_X11)
++#include <X11/Xlib.h>
+ #include <X11/XKBlib.h>
++#endif
+
+ #include <string>
+
+@@ -17,9 +20,12 @@
+ #include "chrome/browser/ui/libgtkui/gtk_util.h"
+ #include "content/public/browser/native_web_keyboard_event.h"
+ #include "ui/base/ime/text_edit_commands.h"
+-#include "ui/base/x/x11_util.h"
+ #include "ui/events/event.h"
+
++#if defined(USE_X11)
++#include "ui/base/x/x11_util.h"
++#endif
++
+ using ui::TextEditCommand;
+
+ // TODO(erg): Rewrite the old gtk_key_bindings_handler_unittest.cc and get them
+@@ -37,11 +43,14 @@ Gtk2KeyBindingsHandler::Gtk2KeyBindingsHandler()
+       has_xkb_(false) {
+   gtk_container_add(GTK_CONTAINER(fake_window_), handler_);
+
++#if defined(USE_X11)
+   int opcode, event, error;
++
+   int major = XkbMajorVersion;
+   int minor = XkbMinorVersion;
+   has_xkb_ = XkbQueryExtension(gfx::GetXDisplay(), &opcode, &event, &error,
+                                &major, &minor);
++#endif
+ }
+
+ Gtk2KeyBindingsHandler::~Gtk2KeyBindingsHandler() {
+@@ -108,14 +117,20 @@ void Gtk2KeyBindingsHandler::BuildGdkEventKeyFromXEvent(
+   GdkKeymap* keymap = gdk_keymap_get_for_display(gdk_display_get_default());
+   GdkModifierType consumed, state;
+
++  #if defined(USE_X11)
+   gdk_event->type =
+       xevent->xany.type == KeyPress ? GDK_KEY_PRESS : GDK_KEY_RELEASE;
+   gdk_event->time = xevent->xkey.time;
+   gdk_event->state = static_cast<GdkModifierType>(xevent->xkey.state);
+   gdk_event->hardware_keycode = xevent->xkey.keycode;
++  #endif
+
+   if (has_xkb_) {
++    #if defined(USE_X11)
+     gdk_event->group = XkbGroupForCoreState(xevent->xkey.state);
++    #else
++    gdk_event->group = 0;
++    #endif
+   } else {
+     // The overwhelming majority of people will be using X servers that support
+     // XKB. GDK has a fallback here that does some complicated stuff to detect
+diff --git a/chrome/browser/ui/libgtkui/gtk_ui.cc b/chrome/browser/ui/libgtkui/gtk_ui.cc
+index a38c6b806be7..72de0f8afbfc 100644
+--- a/chrome/browser/ui/libgtkui/gtk_ui.cc
++++ b/chrome/browser/ui/libgtkui/gtk_ui.cc
+@@ -4,7 +4,10 @@
+
+ #include "chrome/browser/ui/libgtkui/gtk_ui.h"
+
++#if defined(USE_X11)
+ #include <X11/Xcursor/Xcursor.h>
++#endif
++
+ #include <dlfcn.h>
+ #include <math.h>
+ #include <pango/pango.h>
+@@ -37,7 +40,11 @@
+ #include "chrome/browser/ui/libgtkui/select_file_dialog_impl.h"
+ #include "chrome/browser/ui/libgtkui/skia_utils_gtk.h"
+ #include "chrome/browser/ui/libgtkui/unity_service.h"
++#if defined(USE_X11)
+ #include "chrome/browser/ui/libgtkui/x11_input_method_context_impl_gtk.h"
++#else
++#include "ui/base/ime/linux/linux_input_method_context.h"
++#endif
+ #include "printing/features/features.h"
+ #include "third_party/skia/include/core/SkBitmap.h"
+ #include "third_party/skia/include/core/SkCanvas.h"
+@@ -53,7 +60,10 @@
+ #include "ui/gfx/image/image_skia_source.h"
+ #include "ui/gfx/skbitmap_operations.h"
+ #include "ui/gfx/skia_util.h"
++#if defined(USE_X11)
+ #include "ui/gfx/x/x11_types.h"
++#endif
++
+ #include "ui/native_theme/native_theme.h"
+ #include "ui/views/controls/button/blue_button.h"
+ #include "ui/views/controls/button/label_button.h"
+@@ -725,8 +735,13 @@ void GtkUi::SetNonClientMiddleClickAction(NonClientMiddleClickAction action) {
+ std::unique_ptr<ui::LinuxInputMethodContext> GtkUi::CreateInputMethodContext(
+     ui::LinuxInputMethodContextDelegate* delegate,
+     bool is_simple) const {
++#if defined(USE_X11)
+   return std::unique_ptr<ui::LinuxInputMethodContext>(
+       new X11InputMethodContextImplGtk2(delegate, is_simple));
++#else
++  return LinuxInputMethodContextFactory::instance()->CreateInputMethodContext(delegate, is_simple);
++#endif
++
+ }
+
+ gfx::FontRenderParams GtkUi::GetDefaultFontRenderParams() const {
+@@ -967,6 +982,7 @@ void GtkUi::LoadGtkValues() {
+ }
+
+ void GtkUi::UpdateCursorTheme() {
++#if defined(USE_X11)
+   GtkSettings* settings = gtk_settings_get_default();
+
+   gchar* theme = nullptr;
+@@ -980,6 +996,7 @@ void GtkUi::UpdateCursorTheme() {
+     XcursorSetDefaultSize(gfx::GetXDisplay(), size);
+
+   g_free(theme);
++#endif
+ }
+
+ void GtkUi::UpdateDefaultFont() {
+diff --git a/chrome/browser/ui/libgtkui/gtk_util.cc b/chrome/browser/ui/libgtkui/gtk_util.cc
+index a5224ead3ea6..2385ba524c7e 100644
+--- a/chrome/browser/ui/libgtkui/gtk_util.cc
++++ b/chrome/browser/ui/libgtkui/gtk_util.cc
+@@ -133,7 +133,11 @@ std::string GetDesktopName(base::Environment* env) {
+ guint GetGdkKeyCodeForAccelerator(const ui::Accelerator& accelerator) {
+   // The second parameter is false because accelerator keys are expressed in
+   // terms of the non-shift-modified key.
++  #if defined(USE_X11)
+   return XKeysymForWindowsKeyCode(accelerator.key_code(), false);
++  #else
++  return 0;
++  #endif
+ }
+
+ GdkModifierType GetGdkModifierForAccelerator(
+@@ -176,6 +180,7 @@ void SetGtkTransientForAura(GtkWidget* dialog, aura::Window* parent) {
+     return;
+
+   gtk_widget_realize(dialog);
++#if defined(USE_X11)
+   GdkWindow* gdk_window = gtk_widget_get_window(dialog);
+
+   // TODO(erg): Check to make sure we're using X11 if wayland or some other
+@@ -183,6 +188,7 @@ void SetGtkTransientForAura(GtkWidget* dialog, aura::Window* parent) {
+   XSetTransientForHint(GDK_WINDOW_XDISPLAY(gdk_window),
+                        GDK_WINDOW_XID(gdk_window),
+                        parent->GetHost()->GetAcceleratedWidget());
++#endif
+
+   // We also set the |parent| as a property of |dialog|, so that we can unlink
+   // the two later.
+diff --git a/chrome/browser/ui/libgtkui/print_dialog_gtk.cc b/chrome/browser/ui/libgtkui/print_dialog_gtk.cc
+index 9a79bce86ef4..761a0cf2c129 100644
+--- a/chrome/browser/ui/libgtkui/print_dialog_gtk.cc
++++ b/chrome/browser/ui/libgtkui/print_dialog_gtk.cc
+@@ -368,8 +368,13 @@ void PrintDialogGtk2::ShowDialog(
+
+   // We need to call gtk_window_present after making the widgets visible to make
+   // sure window gets correctly raised and gets focus.
++#if defined(USE_X11)
+   gtk_window_present_with_time(
+       GTK_WINDOW(dialog_), ui::X11EventSource::GetInstance()->GetTimestamp());
++#else
++  gtk_window_present(
++      GTK_WINDOW(dialog_));
++#endif
+ }
+
+ void PrintDialogGtk2::PrintDocument(const printing::MetafilePlayer& metafile,
+diff --git a/chrome/browser/ui/libgtkui/select_file_dialog_impl_gtk.cc b/chrome/browser/ui/libgtkui/select_file_dialog_impl_gtk.cc
+index 059d419f9724..8fd767fa7292 100644
+--- a/chrome/browser/ui/libgtkui/select_file_dialog_impl_gtk.cc
++++ b/chrome/browser/ui/libgtkui/select_file_dialog_impl_gtk.cc
+@@ -31,10 +31,15 @@
+ #include "chrome/browser/ui/libgtkui/select_file_dialog_impl.h"
+ #include "ui/aura/window_observer.h"
+ #include "ui/base/l10n/l10n_util.h"
++#if defined(USE_X11)
+ #include "ui/events/platform/x11/x11_event_source.h"
++#endif
++
+ #include "ui/shell_dialogs/select_file_dialog.h"
+ #include "ui/strings/grit/ui_strings.h"
++#if defined(USE_X11)
+ #include "ui/views/widget/desktop_aura/desktop_window_tree_host_x11.h"
++#endif
+
+ namespace {
+
+@@ -52,10 +57,11 @@ void OnFileFilterDataDestroyed(std::string* file_extension) {
+
+ // Runs DesktopWindowTreeHostX11::EnableEventListening() when the file-picker
+ // is closed.
++#if defined(USE_X11)
+ void OnFilePickerDestroy(base::Closure* callback) {
+   callback->Run();
+ }
+-
++#endif
+ }  // namespace
+
+ namespace libgtkui {
+@@ -172,6 +178,7 @@ void SelectFileDialogImplGTK::SelectFileImpl(
+   if (owning_window) {
+     aura::WindowTreeHost* host = owning_window->GetHost();
+     if (host) {
++#if defined(USE_X11)
+       std::unique_ptr<base::Closure> callback =
+           views::DesktopWindowTreeHostX11::GetHostForXID(
+               host->GetAcceleratedWidget())
+@@ -183,6 +190,7 @@ void SelectFileDialogImplGTK::SelectFileImpl(
+           G_OBJECT(dialog), "callback", callback.release(),
+           reinterpret_cast<GDestroyNotify>(OnFilePickerDestroy));
+       gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
++#endif
+     }
+   }
+
+@@ -190,8 +198,12 @@ void SelectFileDialogImplGTK::SelectFileImpl(
+
+   // We need to call gtk_window_present after making the widgets visible to make
+   // sure window gets correctly raised and gets focus.
++#if defined(USE_X11)
+   gtk_window_present_with_time(
+       GTK_WINDOW(dialog), ui::X11EventSource::GetInstance()->GetTimestamp());
++#else
++  gtk_window_present(GTK_WINDOW(dialog));
++#endif
+ }
+
+ void SelectFileDialogImplGTK::AddFilters(GtkFileChooser* chooser) {
