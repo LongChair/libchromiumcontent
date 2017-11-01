@@ -10,6 +10,10 @@ is_component_ffmpeg = true
 ffmpeg_branding = "Chrome"
 use_ozone=true
 toolkit_views=false
+cc_wrapper="ccache"
+use_aura=true
+ozone_auto_platforms=false
+ozone_platform_wayland=true
 
 # Always use the system provided standard library
 use_custom_libcxx = false
